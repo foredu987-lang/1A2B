@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>1A2B 邏輯挑戰</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入紙花特效套件 -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         body {
@@ -40,6 +42,25 @@
             -ms-overflow-style: none;
             scrollbar-width: none;
         }
+
+        /* 爆炸與震動特效 CSS */
+        @keyframes explodeAnim {
+            0% { transform: scale(0.5) rotate(-10deg); opacity: 0; }
+            50% { transform: scale(1.5) rotate(10deg); opacity: 1; }
+            100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        }
+        .explode-emoji {
+            animation: explodeAnim 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            display: inline-block;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0) translateY(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-6px) translateY(-2px) rotate(-1deg); }
+            20%, 40%, 60%, 80% { transform: translateX(6px) translateY(2px) rotate(1deg); }
+        }
+        .shake-screen {
+            animation: shake 0.5s ease-in-out;
+        }
         
         #toast {
             visibility: hidden;
@@ -59,8 +80,22 @@
         
         <!-- 左側：遊戲主體 -->
         <div class="lg:col-span-7 bg-white rounded-3xl shadow-xl p-6 md:p-8 flex flex-col items-center">
-            <h1 class="text-3xl md:text-4xl font-black text-gray-800 mb-2">1A2B 邏輯挑戰</h1>
-            <p class="text-gray-500 mb-8">點擊或拖曳數字至空格中</p>
+            
+            <!-- 標題與常駐按鈕 (移至最頂端，永遠可見) -->
+            <div class="w-full flex justify-between items-start mb-6">
+                <div>
+                    <h1 class="text-2xl md:text-4xl font-black text-gray-800 mb-1">1A2B 邏輯挑戰</h1>
+                    <p class="text-sm md:text-base text-gray-500">點擊或拖曳數字至空格中</p>
+                </div>
+                <div class="flex gap-2 shrink-0">
+                    <button onclick="showLeaderboard()" class="px-3 py-2 md:px-4 md:py-2 bg-yellow-50 text-yellow-700 font-bold rounded-xl hover:bg-yellow-100 transition border border-yellow-200 shadow-sm flex items-center justify-center gap-1 text-sm md:text-base">
+                        🏆<span class="hidden sm:inline"> 榜單</span>
+                    </button>
+                    <button onclick="initGame()" class="px-3 py-2 md:px-4 md:py-2 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 transition border border-red-200 shadow-sm flex items-center justify-center gap-1 text-sm md:text-base">
+                        🔄<span class="hidden sm:inline"> 重新</span>
+                    </button>
+                </div>
+            </div>
 
             <!-- 顯示訊息區 -->
             <div id="gameMessage" class="text-lg font-bold text-blue-600 h-8 mb-4 text-center"></div>
@@ -76,10 +111,12 @@
             </div>
 
             <!-- 操作按鈕 -->
-            <div class="flex flex-wrap justify-center gap-4 w-full mt-auto">
-                <button onclick="clearSlots()" class="px-6 py-3 bg-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-300 transition shadow-sm flex-1">清除</button>
-                <button onclick="useHint()" id="hintBtn" class="px-6 py-3 bg-yellow-100 text-yellow-700 font-bold rounded-xl hover:bg-yellow-200 transition shadow-sm flex-1">💡 提示</button>
-                <button onclick="submitGuess()" id="submitBtn" class="px-8 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition shadow-md flex-[2]">送出猜測</button>
+            <div class="flex flex-wrap justify-center gap-3 w-full mt-auto">
+                <button onclick="clearSlots()" class="px-3 py-3 bg-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-300 transition shadow-sm flex-1">清除</button>
+                <button onclick="useHint()" id="hintBtn" class="px-3 py-3 bg-yellow-100 text-yellow-700 font-bold rounded-xl hover:bg-yellow-200 transition shadow-sm flex-1">💡 提示</button>
+                <button onclick="giveUp()" id="giveUpBtn" class="px-3 py-3 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 transition shadow-sm flex-1">🏳️ 放棄</button>
+                <!-- 將原本的 submitGuess() 改為 handleMainAction() -->
+                <button onclick="handleMainAction()" id="submitBtn" class="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition shadow-md flex-[2]">送出</button>
             </div>
         </div>
 
@@ -112,23 +149,18 @@
                         <span id="turnCounter" class="text-sm bg-gray-100 text-gray-600 px-3 py-1 rounded-full font-bold">第 0 次</span>
                     </div>
                 </div>
-                <!-- 加入 border 視覺化滾動區域，並使用 min-h-0 強制限制高度 -->
-                <div class="overflow-y-auto no-scrollbar flex-1 relative min-h-0 border-y border-gray-100 py-2">
+                <!-- 視覺化滾動區域 (移除了底下的按鈕區塊) -->
+                <div class="overflow-y-auto no-scrollbar flex-1 relative min-h-0 border-t border-gray-100 pt-4">
                     <p class="text-gray-400 text-center mt-10 italic" id="emptyHistoryMsg">尚未開始猜測</p>
                     <div id="historyList" class="flex flex-col gap-3 pb-4">
                         <!-- History items -->
                     </div>
-                </div>
-                <div class="flex gap-3 mt-4 shrink-0">
-                    <button onclick="showLeaderboard()" class="w-1/3 py-3 bg-yellow-50 text-yellow-700 font-bold rounded-xl hover:bg-yellow-100 transition border border-yellow-200 shadow-sm flex items-center justify-center gap-1">🏆 榜單</button>
-                    <button onclick="initGame()" class="w-2/3 py-3 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 transition border border-red-200 shadow-sm">重新開始遊戲</button>
                 </div>
             </div>
 
         </div>
     </div>
 
-    <!-- 浮動提示框 -->
     <!-- 浮動提示框 -->
     <div id="toast" class="fixed top-10 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl font-bold z-50 flex items-center gap-2">
         <span id="toastMsg">提示訊息</span>
@@ -168,8 +200,25 @@
                 你總共猜了 <b id="winTurns" class="text-indigo-600 text-xl mx-1">0</b> 次<br>
                 耗費時間 <b id="winTime" class="text-indigo-600 text-xl mx-1">00:00</b>
             </p>
-            <input type="text" id="playerName" placeholder="請輸入你的大名" class="w-full border-2 border-gray-200 rounded-xl px-4 py-3 mb-6 text-center text-lg font-bold focus:border-blue-500 focus:outline-none transition" maxlength="10">
-            <button onclick="submitScore()" class="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition shadow-md text-lg">儲存成績並看排行榜</button>
+            <input type="text" id="playerName" placeholder="請輸入你的大名留念" class="w-full border-2 border-gray-200 rounded-xl px-4 py-3 mb-6 text-center text-lg font-bold focus:border-blue-500 focus:outline-none transition" maxlength="10">
+            <div class="flex flex-col gap-3">
+                <button onclick="submitScore()" class="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition shadow-md text-lg">儲存成績並看排行榜</button>
+                <button onclick="closeWinAndRestart()" class="w-full py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition text-md border border-gray-200">直接重新開始 🔄</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 放棄/失敗 Modal -->
+    <div id="loseModal" class="fixed inset-0 bg-red-900/80 hidden items-center justify-center z-50 p-4 transition-all duration-300 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full text-center transform transition-all scale-95 opacity-0" id="loseModalContent">
+            <div class="text-6xl mb-4 explode-emoji">💥</div>
+            <h2 class="text-3xl font-black text-red-600 mb-2">任務失敗</h2>
+            <p class="text-gray-600 mb-6 font-medium">
+                不要氣餒，正確解答是：<br><span id="loseSecret" class="text-5xl font-black text-gray-800 tracking-widest block mt-4 mb-2 bg-gray-100 py-3 rounded-xl border-2 border-gray-200"></span>
+            </p>
+            <button onclick="closeLoseAndRestart()" class="w-full py-4 bg-red-600 text-white font-black rounded-xl hover:bg-red-700 transition shadow-lg text-xl flex justify-center items-center gap-2">
+                重新開始挑戰 🔄
+            </button>
         </div>
     </div>
 
@@ -209,6 +258,8 @@
         let gameOver = false;
         let hintUsedCount = 0;
         
+        let audioCtx; // 負責處理音效的 Web Audio API 變數
+        
         // 排行榜與時間狀態
         let startTime = null;
         let timerInterval = null;
@@ -216,6 +267,15 @@
         let currentSortMode = 'turns';
 
         const ALL_POSSIBILITIES = generateAllPossibilities();
+
+        // === 遊戲主動作切換器 (送出 / 重新開始) ===
+        function handleMainAction() {
+            if (gameOver) {
+                initGame();
+            } else {
+                submitGuess();
+            }
+        }
 
         // === 初始化遊戲 ===
         function initGame(showIntro = false) {
@@ -254,12 +314,17 @@
             document.getElementById('gameMessage').innerText = '';
             document.getElementById('gameMessage').className = 'text-lg font-bold text-blue-600 h-8 mb-4 text-center';
 
+            // 恢復送出按鈕的樣式
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.innerHTML = '送出';
+            submitBtn.className = 'px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition shadow-md flex-[2]';
+
             renderSlots();
             renderNumpad();
-            // console.log("Secret (For Dev):", secret.join(''));
+            renderHistory();
         }
 
-        // === UI 渲染 ===
+        // === UI 渲染函數 ===
         function renderSlots() {
             const container = document.getElementById('slots-container');
             container.innerHTML = '';
@@ -318,7 +383,6 @@
                     if(gameOver || isLocked) return;
                     const num = parseInt(e.dataTransfer.getData('text/plain'));
                     if (!isNaN(num) && !currentGuess.includes(num)) {
-                        // 如果該位置原本有數字，先把它拔掉
                         currentGuess[i] = num;
                         // 確保其他格沒有這個數字
                         for(let j=0; j<4; j++) {
@@ -358,7 +422,6 @@
                     };
                     btn.onclick = () => {
                         if (gameOver) return;
-                        // 找到第一個空位填入
                         const emptyIdx = currentGuess.indexOf(null);
                         if (emptyIdx !== -1) {
                             currentGuess[emptyIdx] = i;
@@ -379,7 +442,6 @@
                 document.getElementById('emptyHistoryMsg').style.display = 'none';
             }
             
-            // 清空並重新生成
             container.innerHTML = '';
             
             history.slice().reverse().forEach((record, index) => {
@@ -407,7 +469,6 @@
             document.getElementById('turnCounter').innerText = `第 ${history.length} 次`;
         }
 
-        // === 互動邏輯 ===
         function clearSlots() {
             if (gameOver) return;
             for (let i = 0; i < 4; i++) {
@@ -458,13 +519,139 @@
                 document.getElementById('gameMessage').className = 'text-xl font-black text-green-600 h-8 mb-4 text-center animate-bounce';
                 showToast("挑戰成功！");
                 
-                // 延遲一點點顯示勝利視窗，讓玩家先看到過關畫面
+                // 將「送出」按鈕轉換為「重新開始」按鈕 (綠色)
+                const submitBtn = document.getElementById('submitBtn');
+                submitBtn.innerHTML = '🔄 重新開始';
+                submitBtn.className = 'px-6 py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition shadow-md flex-[2] animate-pulse';
+
+                // 播放勝利音效與撒下彩色紙花
+                playWinSound();
+                confetti({
+                    particleCount: 150,
+                    spread: 70,
+                    origin: { y: 0.6 },
+                    colors: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444'],
+                    zIndex: 9999
+                });
+                
+                // 延遲一點點顯示勝利視窗，讓玩家欣賞一下紙花
                 setTimeout(() => {
                     openWinModal();
-                }, 800);
+                }, 1500);
             } else {
                 document.getElementById('gameMessage').innerText = '繼續努力！';
             }
+        }
+
+        // === 新增：放棄與特效音效功能 ===
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        function playWinSound() {
+            initAudio();
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.type = 'triangle'; // 柔和的波形
+            
+            // 輕快的升階音 (C5, E5, G5, C6)
+            osc.frequency.setValueAtTime(523.25, now);
+            osc.frequency.setValueAtTime(659.25, now + 0.1);
+            osc.frequency.setValueAtTime(783.99, now + 0.2);
+            osc.frequency.setValueAtTime(1046.50, now + 0.3);
+            
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.3, now + 0.05);
+            gain.gain.setValueAtTime(0.3, now + 0.4);
+            gain.gain.linearRampToValueAtTime(0, now + 0.6);
+            
+            osc.start(now);
+            osc.stop(now + 0.6);
+        }
+
+        function playExplodeSound() {
+            initAudio();
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.type = 'sawtooth'; // 鋸齒波做爆炸音
+            
+            // 頻率快速下降製造墜落與爆炸感
+            osc.frequency.setValueAtTime(150, now);
+            osc.frequency.exponentialRampToValueAtTime(0.01, now + 0.5);
+            
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.6, now + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+            
+            osc.start(now);
+            osc.stop(now + 0.5);
+        }
+
+        function giveUp() {
+            if (gameOver) return;
+            gameOver = true;
+            clearInterval(timerInterval);
+            
+            // 將「送出」按鈕轉換為「重新開始」按鈕 (紅色)
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.innerHTML = '🔄 重新開始';
+            submitBtn.className = 'px-6 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-md flex-[2] animate-pulse';
+
+            // 觸發音效與震動
+            playExplodeSound();
+            document.body.classList.add('shake-screen');
+            setTimeout(() => document.body.classList.remove('shake-screen'), 500);
+            
+            document.getElementById('gameMessage').innerText = `💥 任務放棄！`;
+            document.getElementById('gameMessage').className = 'text-xl font-black text-red-600 h-8 mb-4 text-center animate-pulse';
+            
+            // 延遲開啟解答視窗
+            setTimeout(() => {
+                openLoseModal();
+            }, 800);
+        }
+
+        function openLoseModal() {
+            const modal = document.getElementById('loseModal');
+            const content = document.getElementById('loseModalContent');
+            document.getElementById('loseSecret').innerText = secret.join('');
+            
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => {
+                content.classList.remove('scale-95', 'opacity-0');
+                content.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+
+        function closeLoseAndRestart() {
+            const content = document.getElementById('loseModalContent');
+            content.classList.remove('scale-100', 'opacity-100');
+            content.classList.add('scale-95', 'opacity-0');
+            
+            setTimeout(() => {
+                document.getElementById('loseModal').classList.remove('flex');
+                document.getElementById('loseModal').classList.add('hidden');
+                initGame();
+            }, 200);
+        }
+
+        function closeWinAndRestart() {
+            const content = document.getElementById('winModalContent');
+            content.classList.remove('scale-100', 'opacity-100');
+            content.classList.add('scale-95', 'opacity-0');
+            
+            setTimeout(() => {
+                document.getElementById('winModal').classList.remove('flex');
+                document.getElementById('winModal').classList.add('hidden');
+                initGame();
+            }, 200);
         }
 
         function useHint() {
